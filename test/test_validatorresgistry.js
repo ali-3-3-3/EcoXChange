@@ -19,12 +19,14 @@ contract("ValidatorRegistry", (accounts) => {
 
   it("Should not add a validator if not owner", async () => {
     try {
-      await validatorRegistry.addValidator(validator, { from: validator });
+      await validatorRegistry.addValidator(accounts[2], { from: validator });
+      assert.fail("Should have thrown an error");
     } catch (e) {
-      assert(e.message.includes("Only contract owner can call this function"));
-      return;
+      assert(
+        e.message.includes("caller does not have required role"),
+        "Should revert with role error"
+      );
     }
-    assert(false);
   });
 
   it("Should remove a validator", async () => {
@@ -36,10 +38,12 @@ contract("ValidatorRegistry", (accounts) => {
   it("Should not remove a validator if not owner", async () => {
     try {
       await validatorRegistry.removeValidator(validator, { from: validator });
+      assert.fail("Should have thrown an error");
     } catch (e) {
-      assert(e.message.includes("Only contract owner can call this function"));
-      return;
+      assert(
+        e.message.includes("caller does not have required role"),
+        "Should revert with role error"
+      );
     }
-    assert(false);
   });
 });

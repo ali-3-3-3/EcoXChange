@@ -3,12 +3,13 @@ pragma solidity ^0.5.0;
 import "./ValidatorRegistry.sol";
 import "./EcoXChangeToken.sol";
 import "./Company.sol";
+import "./AccessControl.sol";
 
 /**
  * @title EcoXChangeMarket
- * @dev This contract represents a carbon credit market where users can buy and sell carbon credits.
+ * @dev This contract represents a carbon credit market where users can buy and sell carbon credits with enhanced security.
  */
-contract EcoXChangeMarket {
+contract EcoXChangeMarket is AccessControl {
     // Events
     event BuyCredit(address buyer, uint256 amount);
     event ReturnCredits(address seller, uint256 amount);
@@ -24,12 +25,21 @@ contract EcoXChangeMarket {
     ValidatorRegistry validatorRegistryInstance;
     Company companyInstance;
     uint256 excBank = 0;
-    address _owner = msg.sender;
     mapping(address => bool) public isSeller;
     mapping(address => uint256[]) public companyProjects; // Mapping of company address to list of projects
     mapping(uint256 => address[]) public projectBuyers; // Mapping of project id to list of buyers
     mapping(address => mapping(uint256 => uint256)) public projectStakes; //mapping of buyer address to project id to amount
     mapping(address => mapping(uint256 => uint256)) public relisted; // Mapping of company address to projectId to their excs sold, due to listing project that have been validated
+
+    // Enhanced security mappings
+    mapping(uint256 => bool) public projectValidated; // Track validated projects
+    mapping(address => uint256) public userTransactionCount; // Track user activity
+    mapping(uint256 => uint256) public projectCreationTime; // Track project creation time
+
+    // Constants for validation
+    uint256 public constant MIN_TRANSACTION_AMOUNT = 1;
+    uint256 public constant MAX_TRANSACTION_AMOUNT = 10000;
+    uint256 public constant STAKE_PERCENTAGE = 130; // 130% staking requirement
 
     // Constructor
     constructor(
@@ -43,23 +53,40 @@ contract EcoXChangeMarket {
     }
 
     /**
-     * @dev Modifier that allows only the contract owner to call the function.
+     * @dev Modifier that restricts the execution of a function to only be called by a registered validator.
      */
-    modifier onlyOwner() {
+    modifier onlyActiveValidator() {
         require(
-            msg.sender == _owner,
-            "Only contract owner can call this function"
+            validatorRegistryInstance.isValidator(msg.sender),
+            "EcoXChangeMarket: caller is not an active validator"
         );
         _;
     }
 
     /**
-     * @dev Modifier that restricts the execution of a function to only be called by a registered validator.
+     * @dev Modifier to validate project exists and is not completed
      */
-    modifier onlyValidator() {
+    modifier validProject(uint256 projectId) {
         require(
-            validatorRegistryInstance.isValidator(msg.sender),
-            "Only validator can call this function"
+            projectId < companyInstance.numProjects(),
+            "EcoXChangeMarket: project does not exist"
+        );
+        require(
+            companyInstance.getProjectState(projectId) !=
+                Company.ProjectState.completed,
+            "EcoXChangeMarket: project already completed"
+        );
+        _;
+    }
+
+    /**
+     * @dev Modifier to validate transaction amounts
+     */
+    modifier validTransactionAmount(uint256 amount) {
+        require(
+            amount >= MIN_TRANSACTION_AMOUNT &&
+                amount <= MAX_TRANSACTION_AMOUNT,
+            "EcoXChangeMarket: transaction amount out of bounds"
         );
         _;
     }
@@ -74,7 +101,12 @@ contract EcoXChangeMarket {
     function withdrawEther(
         address payable companyAddress,
         uint256 amount
-    ) public onlyValidator {
+    )
+        public
+        onlyActiveValidator
+        validAddress(companyAddress)
+        validAmount(amount)
+    {
         require(
             amount <= address(this).balance,
             "Insufficient contract balance"
@@ -109,7 +141,15 @@ contract EcoXChangeMarket {
         uint256 projectId,
         bool isValid,
         uint256 actualEXC
-    ) public onlyValidator {
+    )
+        public
+        onlyActiveValidator
+        whenNotPaused
+        validAddress(companyAddress)
+        validProject(projectId)
+        validAmount(actualEXC)
+        nonReentrant
+    {
         // Validate a project by a validator, and handle penalty if project is invalid, otherwise transfer EXC to buyers
         require(
             companyInstance.getProjectState(projectId) !=
@@ -224,9 +264,22 @@ contract EcoXChangeMarket {
      *  Emits a `ReturnCredits` event with the seller's address and the amount of EXC sold.
      */
 
-    function sell(uint256 _excAmount, uint256 projectId) public payable {
-        //seller lists exc for sale anytime during project
-        require(_excAmount > 0, "Invalid amount");
+    function sell(
+        uint256 _excAmount,
+        uint256 projectId
+    )
+        public
+        payable
+        whenNotPaused
+        notBlacklisted(msg.sender)
+        validTransactionAmount(_excAmount)
+        nonReentrant
+    {
+        // Enhanced validation - check if sender is a registered company
+        require(
+            companyInstance.registeredCompanies(msg.sender),
+            "EcoXChangeMarket: caller must be a registered company"
+        );
         require(
             companyInstance.checkEXCListed(msg.sender, projectId, _excAmount),
             "EXC for project overexceeded"
@@ -285,10 +338,24 @@ contract EcoXChangeMarket {
         uint256 _excAmount,
         address payable companyAddress,
         uint256 projectId
-    ) public payable {
-        // UI: has to click on a project to buy -- hence project has to be listed for this function to be called; no checks needed
-        require(_excAmount > 0, "Invalid amount");
-        require(msg.value == _excAmount * 1 ether, "Invalid amount"); //ensure buyer gave correct amount of ether to contract for buying
+    )
+        public
+        payable
+        whenNotPaused
+        notBlacklisted(msg.sender)
+        validAddress(companyAddress)
+        validTransactionAmount(_excAmount)
+        nonReentrant
+    {
+        // Enhanced validation
+        require(
+            msg.value == _excAmount * 1 ether,
+            "EcoXChangeMarket: incorrect ether amount"
+        );
+        require(
+            companyInstance.registeredCompanies(companyAddress),
+            "EcoXChangeMarket: company address is not registered"
+        );
         require(
             companyInstance.checkSufficientEXC(
                 companyAddress,

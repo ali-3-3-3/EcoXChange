@@ -22,17 +22,18 @@ contract("Company", (accounts) => {
       await company.addCompany(companyAddress, "Test Company", {
         from: companyAddress,
       });
+      assert.fail("Should have thrown an error");
     } catch (e) {
       assert(
-        e.message.includes("Only contract owner can execute this function")
+        e.message.includes("caller does not have required role"),
+        "Should revert with role error"
       );
-      return;
     }
-    assert(false);
   });
 
   it("Should add a project", async () => {
-    await company.addProject("Test Project", "Test Description", 1000, 3, {
+    // Use valid duration (within 1-365 days range)
+    await company.addProject("Test Project", "Test Description", 30, 3, {
       from: companyAddress,
     });
     const projectData = await company.projects(0);

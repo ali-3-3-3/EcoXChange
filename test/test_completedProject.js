@@ -33,20 +33,20 @@ contract("EcoXChangeMarket for Completed Projects", function (accounts) {
       await companyInstance.addCompany(companyAddress, "Test Company", {
         from: companyAddress,
       });
+      assert.fail("Should have thrown an error");
     } catch (e) {
       assert(
-        e.message.includes("Only contract owner can execute this function")
+        e.message.includes("caller does not have required role"),
+        "Should revert with role error"
       );
-      return;
     }
-    assert(false);
   });
 
   it("Should add a project", async () => {
     await companyInstance.addProject(
       "Test Project",
       "Test Description",
-      1000,
+      30, // Use valid duration (within 1-365 days range)
       3,
       { from: companyAddress }
     );

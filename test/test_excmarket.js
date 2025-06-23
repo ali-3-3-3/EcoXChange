@@ -20,10 +20,25 @@ contract("EcoXChangeMarket", function (accounts) {
     ecoXChangeTokenInstance = await EcoXChangeToken.deployed(); // Deploy the token instance
     erc20Instance = await ERC20.deployed();
 
-    // Register validator
-    await validatorRegistryInstance.registerValidator(validator, {
-      from: admin,
-    });
+    // Register validator only if not already registered
+    const isValidatorRegistered = await validatorRegistryInstance.validators(
+      validator
+    );
+    if (!isValidatorRegistered) {
+      await validatorRegistryInstance.addValidator(validator, {
+        from: admin,
+      });
+    }
+
+    // Add company only if not already registered
+    const isCompanyRegistered = await companyInstance.registeredCompanies(
+      companyAddress
+    );
+    if (!isCompanyRegistered) {
+      await companyInstance.addCompany(companyAddress, "Test Company", {
+        from: admin,
+      });
+    }
   });
 
   it("should allow a company to create a project", async () => {
@@ -33,19 +48,24 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
-    // Check if project was created
-    const projectCount = await companyInstance.getCompanyProjectCount(
-      companyAddress
+    // Check if project was created by verifying the project exists
+    const companyProjectIds = await companyInstance.companyProjects(
+      companyAddress,
+      0
     );
-    assert.equal(projectCount.toNumber(), 1, "Project count should be 1");
+    assert.equal(
+      companyProjectIds.toNumber(),
+      0,
+      "First project ID should be 0"
+    );
 
     // Check project details
     const project = await companyInstance.projects(0);
@@ -75,11 +95,11 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
@@ -112,11 +132,11 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
@@ -152,25 +172,34 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    // Get current project count to determine the next project ID
+    const currentProjectCount = await companyInstance.numProjects();
+    const projectId = currentProjectCount.toNumber();
+
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
     // Sell EXC
-    await ecoXChangeMarketInstance.sell(3, 0, {
+    await ecoXChangeMarketInstance.sell(3, projectId, {
       from: companyAddress,
       value: web3.utils.toWei("3.9", "ether"),
     });
 
     // Buy EXC
-    let buy1 = await ecoXChangeMarketInstance.buy(1, companyAddress, 0, {
-      from: buyer1,
-      value: web3.utils.toWei("1", "ether"),
-    });
+    let buy1 = await ecoXChangeMarketInstance.buy(
+      1,
+      companyAddress,
+      projectId,
+      {
+        from: buyer1,
+        value: web3.utils.toWei("1", "ether"),
+      }
+    );
 
     // Get buyer's initial EXC balance
     const buyerData = async (buyer) => {
@@ -185,17 +214,17 @@ contract("EcoXChangeMarket", function (accounts) {
     // Validate project
     let validate = await ecoXChangeMarketInstance.validateProject(
       companyAddress,
-      0,
+      projectId,
       true,
-      3,
+      tonCO2Saved, // Use the actual project EXC amount
       { from: validator }
     );
 
     // Check if project state was updated
-    const projectState = await companyInstance.getProjectState(0);
+    const projectState = await companyInstance.getProjectState(projectId);
     assert.equal(
       projectState.toNumber(),
-      2,
+      1,
       "Project state should be completed"
     );
 
@@ -215,22 +244,26 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    // Get current project count to determine the next project ID
+    const currentProjectCount = await companyInstance.numProjects();
+    const projectId = currentProjectCount.toNumber();
+
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
     // Sell EXC
-    await ecoXChangeMarketInstance.sell(3, 0, {
+    await ecoXChangeMarketInstance.sell(3, projectId, {
       from: companyAddress,
       value: web3.utils.toWei("3.9", "ether"),
     });
 
     // Buy EXC
-    await ecoXChangeMarketInstance.buy(1, companyAddress, 0, {
+    await ecoXChangeMarketInstance.buy(1, companyAddress, projectId, {
       from: buyer1,
       value: web3.utils.toWei("1", "ether"),
     });
@@ -238,17 +271,17 @@ contract("EcoXChangeMarket", function (accounts) {
     // Validate project as invalid
     let validate = await ecoXChangeMarketInstance.validateProject(
       companyAddress,
-      0,
+      projectId,
       false,
-      1,
+      tonCO2Saved, // Use the same actualEXC as the project's capacity
       { from: validator }
     );
 
     // Check if project state was updated
-    const projectState = await companyInstance.getProjectState(0);
+    const projectState = await companyInstance.getProjectState(projectId);
     assert.equal(
       projectState.toNumber(),
-      2,
+      1,
       "Project state should be completed"
     );
   });
@@ -260,11 +293,11 @@ contract("EcoXChangeMarket", function (accounts) {
     const tonCO2Saved = 10;
     const daystillCompletion = 30;
 
-    await companyInstance.createProject(
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
@@ -279,8 +312,8 @@ contract("EcoXChangeMarket", function (accounts) {
       assert.fail("Should have thrown an error");
     } catch (error) {
       assert(
-        error.message.includes("Only validator can call this function"),
-        "Error message should contain 'Only validator can call this function'"
+        error.message.includes("caller is not an active validator"),
+        "Error message should contain validator error"
       );
     }
   });
@@ -295,11 +328,11 @@ contract("EcoXChangeMarket", function (accounts) {
     const listedEXC = 5;
     const soldEXC = 3;
 
-    await companyInstance.createProject(
+    await companyInstance.addProject(
       projectName,
       desc,
-      tonCO2Saved,
       daystillCompletion,
+      tonCO2Saved,
       { from: companyAddress }
     );
 
@@ -328,7 +361,7 @@ contract("EcoXChangeMarket", function (accounts) {
     const projectState = await companyInstance.getProjectState(projectId);
     assert.equal(
       projectState.toNumber(),
-      2,
+      1,
       "Project state should be completed"
     );
   });
