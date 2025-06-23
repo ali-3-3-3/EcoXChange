@@ -1,0 +1,8 @@
+{
+  "name": "ecoxchange",
+  "version": "1.0.0",
+  "description": "EcoXChange - Carbon Credit Trading on Ethereum",
+  "dependencies": {
+    "truffle-assertions": "^0.9.2"
+  }
+}
