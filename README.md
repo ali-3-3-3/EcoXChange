@@ -41,6 +41,9 @@ This approach encourages a decentralized, transparent, and scalable way to promo
 - `/contracts`: Contains the Solidity smart contracts responsible for minting and managing carbon credit tokens.
 - `/migrations`: Handles the deployment process of the smart contracts to the blockchain.
 - `/test`: Includes JavaScript test scripts using the Truffle framework to verify contract functionality.
+- `/backend`: Express.js API server providing REST endpoints for the web application.
+- `/frontend`: Next.js React application providing the user interface.
+- `/ecoxchange-app`: Additional frontend components and configurations.
 
 ## Installation
 
@@ -51,14 +54,43 @@ This approach encourages a decentralized, transparent, and scalable way to promo
    ```
 
 2. **Install dependencies**:
-   Navigate to the project directory and install required packages:
+
+   **For Smart Contracts:**
 
    ```bash
    cd EcoXChange
    npm install
    ```
 
-3. **Deploy the contracts**:
+   **For Backend API:**
+
+   ```bash
+   cd backend
+   npm install
+   ```
+
+   **For Frontend:**
+
+   ```bash
+   cd ecoxchange-app/frontend
+   npm install
+   ```
+
+3. **Set up environment variables**:
+
+   ```bash
+   # Backend
+   cd backend
+   cp .env.example .env
+   # Edit .env with your configuration
+
+   # Frontend
+   cd ../ecoxchange-app/frontend
+   cp .env.local.example .env.local
+   # Edit .env.local with your configuration
+   ```
+
+4. **Deploy the contracts** (optional):
    Ensure you have a local Ethereum node running (like Ganache) and deploy the contracts:
    ```bash
    truffle migrate
@@ -66,14 +98,64 @@ This approach encourages a decentralized, transparent, and scalable way to promo
 
 ## Usage
 
-Once the contracts are deployed, interact with them using JavaScript in a Node.js environment. You can mint, transfer, or check balances of EcoXChange tokens.
+### Running the Full Application
+
+1. **Start the Backend API:**
+
+   ```bash
+   cd backend
+   npm start          # Production mode
+   # OR
+   npm run dev        # Development mode with auto-restart
+   ```
+
+   The API will be available at `http://localhost:5000`
+
+2. **Start the Frontend:**
+
+   ```bash
+   cd ecoxchange-app/frontend
+   npm run dev
+   ```
+
+   The web application will be available at `http://localhost:3000`
+
+3. **Smart Contract Interaction:**
+   Once the contracts are deployed, interact with them using JavaScript in a Node.js environment. You can mint, transfer, or check balances of EcoXChange tokens.
+
+### API Endpoints
+
+The backend provides the following REST API endpoints:
+
+- `GET /health` - Server health check
+- `POST /api/auth/login` - User authentication (Phase 2)
+- `GET /api/users` - User management (Phase 2)
+- `GET /api/projects` - Carbon credit projects (Phase 2)
+- `GET /api/transactions` - Trading transactions (Phase 2)
+- `GET /api/validators` - Project validation (Phase 2)
+
+For detailed API documentation, see `backend/README.md`.
 
 ## Testing
 
-Run the provided test scripts to ensure the functionality of the contracts:
+**Smart Contracts:**
 
 ```bash
 truffle test
+```
+
+**Backend API:**
+
+```bash
+cd backend
+npm test
+```
+
+**Frontend:**
+
+```bash
+cd ecoxchange-app/frontend
+npm test
 ```
 
 ## Contributing
