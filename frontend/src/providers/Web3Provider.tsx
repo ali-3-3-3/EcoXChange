@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import Web3 from 'web3';
+import { contractService } from '../services/contractService';
+import { apiService } from '../services/apiService';
 
 interface Web3ContextType {
   web3: Web3 | null;
@@ -10,9 +12,12 @@ interface Web3ContextType {
   isConnected: boolean;
   isLoading: boolean;
   error: string | null;
+  tokenBalance: string;
+  ethBalance: string;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   switchNetwork: (chainId: number) => Promise<void>;
+  refreshBalances: () => Promise<void>;
 }
 
 const Web3Context = createContext<Web3ContextType | undefined>(undefined);
@@ -28,10 +33,34 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tokenBalance, setTokenBalance] = useState<string>('0');
+  const [ethBalance, setEthBalance] = useState<string>('0');
 
   // Check if MetaMask is installed
   const isMetaMaskInstalled = () => {
     return typeof window !== 'undefined' && typeof window.ethereum !== 'undefined';
+  };
+
+  // Refresh balances
+  const refreshBalances = async () => {
+    if (!account || !web3) return;
+
+    try {
+      // Get ETH balance
+      const ethBal = await web3.eth.getBalance(account);
+      setEthBalance(web3.utils.fromWei(ethBal, 'ether'));
+
+      // Get token balance
+      try {
+        const tokenBal = await contractService.getTokenBalance(account);
+        setTokenBalance(tokenBal);
+      } catch (error) {
+        console.warn('Could not fetch token balance:', error);
+        setTokenBalance('0');
+      }
+    } catch (error) {
+      console.error('Error refreshing balances:', error);
+    }
   };
 
   // Initialize Web3 connection
@@ -80,14 +109,14 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       setError(null);
 
       // Request account access
-      const accounts = await window.ethereum.request({ 
-        method: 'eth_requestAccounts' 
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
       });
 
       if (accounts.length > 0) {
         setAccount(accounts[0]);
         setIsConnected(true);
-        
+
         // Initialize Web3 if not already done
         if (!web3) {
           const web3Instance = new Web3(window.ethereum);
@@ -97,6 +126,17 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         // Get chain ID
         const chainId = await window.ethereum.request({ method: 'eth_chainId' });
         setChainId(parseInt(chainId, 16));
+
+        // Connect contract service
+        try {
+          await contractService.connect(accounts[0]);
+          console.log('✅ Contract service connected');
+        } catch (error) {
+          console.warn('⚠️ Contract service connection failed:', error);
+        }
+
+        // Refresh balances
+        await refreshBalances();
       }
     } catch (err: any) {
       console.error('Failed to connect wallet:', err);
@@ -116,6 +156,11 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     setIsConnected(false);
     setChainId(null);
     setError(null);
+    setTokenBalance('0');
+    setEthBalance('0');
+
+    // Clear API service auth token
+    apiService.setAuthToken(null);
   };
 
   // Switch network
@@ -187,9 +232,12 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     isConnected,
     isLoading,
     error,
+    tokenBalance,
+    ethBalance,
     connectWallet,
     disconnectWallet,
     switchNetwork,
+    refreshBalances,
   };
 
   return (

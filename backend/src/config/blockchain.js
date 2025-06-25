@@ -1,12 +1,14 @@
-const Web3 = require('web3');
-const contract = require('@truffle/contract');
-require('dotenv').config();
+const Web3 = require("web3");
+const contract = require("@truffle/contract");
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../../.env") });
 
 // Contract artifacts (will be populated after compilation)
-const EcoXChangeTokenArtifact = require('../../build/contracts/EcoXChangeToken.json');
-const EcoXChangeMarketArtifact = require('../../build/contracts/EcoXChangeMarket.json');
-const ValidatorRegistryArtifact = require('../../build/contracts/ValidatorRegistry.json');
-const CompanyArtifact = require('../../build/contracts/Company.json');
+const EcoXChangeTokenArtifact = require("../../../build/contracts/EcoXChangeToken.json");
+const EcoXChangeMarketArtifact = require("../../../build/contracts/EcoXChangeMarket.json");
+const ValidatorRegistryArtifact = require("../../../build/contracts/ValidatorRegistry.json");
+const CompanyArtifact = require("../../../build/contracts/Company.json");
+const DynamicPricingArtifact = require("../../../build/contracts/DynamicPricing.json");
 
 class BlockchainService {
   constructor() {
@@ -19,16 +21,18 @@ class BlockchainService {
   async initialize() {
     try {
       // Initialize Web3
-      const rpcUrl = process.env.ETHEREUM_RPC_URL || 'http://127.0.0.1:8545';
+      const rpcUrl = process.env.ETHEREUM_RPC_URL || "http://127.0.0.1:8545";
       this.web3 = new Web3(new Web3.providers.HttpProvider(rpcUrl));
-      
+
       // Get network ID
       this.networkId = await this.web3.eth.net.getId();
       console.log(`🔗 Connected to Ethereum network (ID: ${this.networkId})`);
 
       // Set up account if private key is provided
       if (process.env.PRIVATE_KEY) {
-        const account = this.web3.eth.accounts.privateKeyToAccount(process.env.PRIVATE_KEY);
+        const account = this.web3.eth.accounts.privateKeyToAccount(
+          process.env.PRIVATE_KEY
+        );
         this.web3.eth.accounts.wallet.add(account);
         this.account = account.address;
         console.log(`👤 Using account: ${this.account}`);
@@ -36,10 +40,10 @@ class BlockchainService {
 
       // Initialize contracts
       await this.initializeContracts();
-      
-      console.log('✅ Blockchain service initialized successfully');
+
+      console.log("✅ Blockchain service initialized successfully");
     } catch (error) {
-      console.error('❌ Blockchain initialization failed:', error);
+      console.error("❌ Blockchain initialization failed:", error);
       throw error;
     }
   }
@@ -49,55 +53,75 @@ class BlockchainService {
       // EcoXChangeToken
       const EcoXChangeToken = contract(EcoXChangeTokenArtifact);
       EcoXChangeToken.setProvider(this.web3.currentProvider);
-      
+
       if (process.env.ECOXCHANGE_TOKEN_ADDRESS) {
-        this.contracts.ecoXChangeToken = await EcoXChangeToken.at(process.env.ECOXCHANGE_TOKEN_ADDRESS);
+        this.contracts.ecoXChangeToken = await EcoXChangeToken.at(
+          process.env.ECOXCHANGE_TOKEN_ADDRESS
+        );
       } else {
         // Deploy if address not provided (development only)
-        if (process.env.NODE_ENV === 'development') {
-          this.contracts.ecoXChangeToken = await EcoXChangeToken.new({ from: this.account });
-          console.log(`📄 EcoXChangeToken deployed at: ${this.contracts.ecoXChangeToken.address}`);
+        if (process.env.NODE_ENV === "development") {
+          this.contracts.ecoXChangeToken = await EcoXChangeToken.new({
+            from: this.account,
+          });
+          console.log(
+            `📄 EcoXChangeToken deployed at: ${this.contracts.ecoXChangeToken.address}`
+          );
         }
       }
 
       // EcoXChangeMarket
       const EcoXChangeMarket = contract(EcoXChangeMarketArtifact);
       EcoXChangeMarket.setProvider(this.web3.currentProvider);
-      
+
       if (process.env.ECOXCHANGE_MARKET_ADDRESS) {
-        this.contracts.ecoXChangeMarket = await EcoXChangeMarket.at(process.env.ECOXCHANGE_MARKET_ADDRESS);
+        this.contracts.ecoXChangeMarket = await EcoXChangeMarket.at(
+          process.env.ECOXCHANGE_MARKET_ADDRESS
+        );
       }
 
       // ValidatorRegistry
       const ValidatorRegistry = contract(ValidatorRegistryArtifact);
       ValidatorRegistry.setProvider(this.web3.currentProvider);
-      
+
       if (process.env.VALIDATOR_REGISTRY_ADDRESS) {
-        this.contracts.validatorRegistry = await ValidatorRegistry.at(process.env.VALIDATOR_REGISTRY_ADDRESS);
+        this.contracts.validatorRegistry = await ValidatorRegistry.at(
+          process.env.VALIDATOR_REGISTRY_ADDRESS
+        );
       }
 
       // Company
       const Company = contract(CompanyArtifact);
       Company.setProvider(this.web3.currentProvider);
-      
+
       if (process.env.COMPANY_ADDRESS) {
         this.contracts.company = await Company.at(process.env.COMPANY_ADDRESS);
       }
 
-      console.log('📄 Smart contracts initialized');
+      // DynamicPricing
+      const DynamicPricing = contract(DynamicPricingArtifact);
+      DynamicPricing.setProvider(this.web3.currentProvider);
+
+      if (process.env.DYNAMIC_PRICING_ADDRESS) {
+        this.contracts.dynamicPricing = await DynamicPricing.at(
+          process.env.DYNAMIC_PRICING_ADDRESS
+        );
+      }
+
+      console.log("📄 Smart contracts initialized");
     } catch (error) {
-      console.error('❌ Contract initialization failed:', error);
+      console.error("❌ Contract initialization failed:", error);
       throw error;
     }
   }
 
   // Utility methods
   toWei(amount) {
-    return this.web3.utils.toWei(amount.toString(), 'ether');
+    return this.web3.utils.toWei(amount.toString(), "ether");
   }
 
   fromWei(amount) {
-    return this.web3.utils.fromWei(amount.toString(), 'ether');
+    return this.web3.utils.fromWei(amount.toString(), "ether");
   }
 
   isValidAddress(address) {
@@ -115,20 +139,46 @@ class BlockchainService {
   // Contract interaction methods
   async getTokenBalance(address) {
     if (!this.contracts.ecoXChangeToken) {
-      throw new Error('EcoXChangeToken contract not initialized');
+      throw new Error("EcoXChangeToken contract not initialized");
     }
     return await this.contracts.ecoXChangeToken.checkEXC(address);
   }
 
-  async transferTokens(from, to, amount) {
-    if (!this.contracts.ecoXChangeToken) {
-      throw new Error('EcoXChangeToken contract not initialized');
+  async getProjectDetails(projectId) {
+    if (!this.contracts.company) {
+      throw new Error("Company contract not initialized");
     }
-    return await this.contracts.ecoXChangeToken.transferEXC(to, amount, { from });
+    return await this.contracts.company.getProject(projectId);
+  }
+
+  async getCurrentPrice(projectId) {
+    if (!this.contracts.dynamicPricing) {
+      throw new Error("DynamicPricing contract not initialized");
+    }
+    return await this.contracts.dynamicPricing.getCurrentPrice(projectId);
+  }
+
+  async isValidator(address) {
+    if (!this.contracts.validatorRegistry) {
+      throw new Error("ValidatorRegistry contract not initialized");
+    }
+    return await this.contracts.validatorRegistry.isValidator(address);
+  }
+
+  // Get contract instances
+  getContracts() {
+    return this.contracts;
+  }
+
+  getWeb3() {
+    return this.web3;
   }
 }
 
 // Create singleton instance
 const blockchainService = new BlockchainService();
 
-module.exports = blockchainService;
+module.exports = {
+  BlockchainService,
+  blockchainService,
+};
