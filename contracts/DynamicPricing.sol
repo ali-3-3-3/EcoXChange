@@ -176,7 +176,13 @@ contract DynamicPricing is AccessControl {
         if (pricing.model == PricingModel.FIXED) {
             return pricing.currentPrice;
         } else if (pricing.model == PricingModel.SUPPLY_DEMAND) {
-            return calculateSupplyDemandPrice(projectId);
+            // Use stored current price if it has been updated by trades
+            // Otherwise fall back to calculated price
+            if (pricing.totalVolume > 0) {
+                return pricing.currentPrice;
+            } else {
+                return calculateSupplyDemandPrice(projectId);
+            }
         } else if (pricing.model == PricingModel.BONDING_CURVE) {
             return calculateBondingCurvePrice(projectId);
         } else if (pricing.model == PricingModel.QUALITY_ADJUSTED) {
@@ -339,7 +345,14 @@ contract DynamicPricing is AccessControl {
         );
 
         uint256 oldPrice = pricing.currentPrice;
-        uint256 newPrice = getCurrentPrice(projectId);
+
+        // Calculate new price based on supply/demand model
+        uint256 newPrice;
+        if (pricing.model == PricingModel.SUPPLY_DEMAND) {
+            newPrice = calculateSupplyDemandPrice(projectId);
+        } else {
+            newPrice = getCurrentPrice(projectId);
+        }
 
         // Update pricing data
         pricing.currentPrice = newPrice;
