@@ -3,6 +3,7 @@ const Company = artifacts.require("Company");
 const ValidatorRegistry = artifacts.require("ValidatorRegistry");
 const EcoXChangeToken = artifacts.require("EcoXChangeToken"); // Make sure this line is here
 const ERC20 = artifacts.require("ERC20");
+const DynamicPricing = artifacts.require("DynamicPricing");
 
 contract("EcoXChangeMarket", function (accounts) {
   let companyInstance;
@@ -10,6 +11,7 @@ contract("EcoXChangeMarket", function (accounts) {
   let ecoXChangeMarketInstance;
   let ecoXChangeTokenInstance; // Declare the token instance variable
   let erc20Instance;
+  let dynamicPricingInstance;
 
   const [admin, validator, companyAddress, buyer1, buyer2] = accounts;
 
@@ -19,6 +21,19 @@ contract("EcoXChangeMarket", function (accounts) {
     ecoXChangeMarketInstance = await EcoXChangeMarket.deployed();
     ecoXChangeTokenInstance = await EcoXChangeToken.deployed(); // Deploy the token instance
     erc20Instance = await ERC20.deployed();
+    dynamicPricingInstance = await DynamicPricing.deployed();
+
+    // Grant admin role to admin account for pricing initialization
+    const ADMIN_ROLE = await ecoXChangeMarketInstance.ADMIN_ROLE();
+    const hasAdminRole = await ecoXChangeMarketInstance.hasRole(
+      ADMIN_ROLE,
+      admin
+    );
+    if (!hasAdminRole) {
+      await ecoXChangeMarketInstance.grantRole(ADMIN_ROLE, admin, {
+        from: admin,
+      });
+    }
 
     // Register validator only if not already registered
     const isValidatorRegistered = await validatorRegistryInstance.validators(
@@ -38,6 +53,20 @@ contract("EcoXChangeMarket", function (accounts) {
       await companyInstance.addCompany(companyAddress, "Test Company", {
         from: admin,
       });
+    }
+
+    // Grant ADMIN_ROLE to market contract in DynamicPricing for price updates
+    const PRICING_ADMIN_ROLE = await dynamicPricingInstance.ADMIN_ROLE();
+    const marketHasPricingRole = await dynamicPricingInstance.hasRole(
+      PRICING_ADMIN_ROLE,
+      ecoXChangeMarketInstance.address
+    );
+    if (!marketHasPricingRole) {
+      await dynamicPricingInstance.grantRole(
+        PRICING_ADMIN_ROLE,
+        ecoXChangeMarketInstance.address,
+        { from: admin }
+      );
     }
   });
 
@@ -103,6 +132,20 @@ contract("EcoXChangeMarket", function (accounts) {
       { from: companyAddress }
     );
 
+    // Initialize pricing for the project
+    const projectId = (await companyInstance.numProjects()).toNumber() - 1;
+    await ecoXChangeMarketInstance.initializeProjectPricing(
+      projectId,
+      1, // SUPPLY_DEMAND model
+      500, // quality score
+      { from: admin }
+    );
+
+    // Initialize pricing for the project
+    await ecoXChangeMarketInstance.initializeProjectPricing(0, 1, 500, {
+      from: admin,
+    });
+
     // Sell EXC
     await ecoXChangeMarketInstance.sell(3, 0, {
       from: companyAddress,
@@ -138,6 +181,15 @@ contract("EcoXChangeMarket", function (accounts) {
       daystillCompletion,
       tonCO2Saved,
       { from: companyAddress }
+    );
+
+    // Initialize pricing for the project
+    const projectId = (await companyInstance.numProjects()).toNumber() - 1;
+    await ecoXChangeMarketInstance.initializeProjectPricing(
+      projectId,
+      1, // SUPPLY_DEMAND model
+      500, // quality score
+      { from: admin }
     );
 
     // Sell EXC
@@ -183,6 +235,11 @@ contract("EcoXChangeMarket", function (accounts) {
       tonCO2Saved,
       { from: companyAddress }
     );
+
+    // Initialize pricing for the project
+    await ecoXChangeMarketInstance.initializeProjectPricing(projectId, 1, 500, {
+      from: admin,
+    });
 
     // Sell EXC
     await ecoXChangeMarketInstance.sell(3, projectId, {
@@ -255,6 +312,11 @@ contract("EcoXChangeMarket", function (accounts) {
       tonCO2Saved,
       { from: companyAddress }
     );
+
+    // Initialize pricing for the project
+    await ecoXChangeMarketInstance.initializeProjectPricing(projectId, 1, 500, {
+      from: admin,
+    });
 
     // Sell EXC
     await ecoXChangeMarketInstance.sell(3, projectId, {
@@ -336,29 +398,48 @@ contract("EcoXChangeMarket", function (accounts) {
       { from: companyAddress }
     );
 
+    // Get the actual project ID that was just created
+    const actualProjectId =
+      (await companyInstance.numProjects()).toNumber() - 1;
+
+    // Initialize pricing for the project
+    await ecoXChangeMarketInstance.initializeProjectPricing(
+      actualProjectId,
+      1,
+      500,
+      {
+        from: admin,
+      }
+    );
+
     // Sell EXC
-    await ecoXChangeMarketInstance.sell(listedEXC, projectId, {
+    await ecoXChangeMarketInstance.sell(listedEXC, actualProjectId, {
       from: companyAddress,
       value: web3.utils.toWei((listedEXC * 1.3).toString(), "ether"),
     });
 
     // Buy EXC
-    await ecoXChangeMarketInstance.buy(soldEXC, companyAddress, projectId, {
-      from: buyer1,
-      value: web3.utils.toWei(soldEXC.toString(), "ether"),
-    });
+    await ecoXChangeMarketInstance.buy(
+      soldEXC,
+      companyAddress,
+      actualProjectId,
+      {
+        from: buyer1,
+        value: web3.utils.toWei(soldEXC.toString(), "ether"),
+      }
+    );
 
     // Validate project
     let validate = await ecoXChangeMarketInstance.validateProject(
       companyAddress,
-      projectId,
+      actualProjectId,
       true,
       tonCO2Saved,
       { from: validator }
     );
 
     // Check if project state was updated
-    const projectState = await companyInstance.getProjectState(projectId);
+    const projectState = await companyInstance.getProjectState(actualProjectId);
     assert.equal(
       projectState.toNumber(),
       1,

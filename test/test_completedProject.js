@@ -4,6 +4,7 @@ var EcoXChangeMarket = artifacts.require("EcoXChangeMarket");
 var Company = artifacts.require("Company");
 var ValidatorRegistry = artifacts.require("ValidatorRegistry");
 var EcoXChangeToken = artifacts.require("EcoXChangeToken");
+var DynamicPricing = artifacts.require("DynamicPricing");
 
 contract("EcoXChangeMarket for Completed Projects", function (accounts) {
   let companyInstance = null;
@@ -15,6 +16,57 @@ contract("EcoXChangeMarket for Completed Projects", function (accounts) {
     companyInstance = await Company.deployed();
     ecoXChangeMarketInstance = await EcoXChangeMarket.deployed();
     ecoXChangeTokenInstance = await EcoXChangeToken.deployed();
+    dynamicPricingInstance = await DynamicPricing.deployed();
+
+    // Grant admin role to owner for pricing initialization
+    // In deployed contracts, the deployer should already have admin role
+    const ADMIN_ROLE = await ecoXChangeMarketInstance.ADMIN_ROLE();
+    const hasAdminRole = await ecoXChangeMarketInstance.hasRole(
+      ADMIN_ROLE,
+      owner
+    );
+    console.log("Owner has ADMIN_ROLE:", hasAdminRole);
+
+    // If owner doesn't have admin role, grant it using the DEFAULT_ADMIN_ROLE
+    if (!hasAdminRole) {
+      const DEFAULT_ADMIN_ROLE =
+        await ecoXChangeMarketInstance.DEFAULT_ADMIN_ROLE();
+      const hasDefaultAdminRole = await ecoXChangeMarketInstance.hasRole(
+        DEFAULT_ADMIN_ROLE,
+        owner
+      );
+      console.log("Owner has DEFAULT_ADMIN_ROLE:", hasDefaultAdminRole);
+
+      if (hasDefaultAdminRole) {
+        await ecoXChangeMarketInstance.grantRole(ADMIN_ROLE, owner, {
+          from: owner,
+        });
+        console.log("Successfully granted ADMIN_ROLE to owner");
+      } else {
+        console.log(
+          "Owner doesn't have DEFAULT_ADMIN_ROLE, cannot grant ADMIN_ROLE"
+        );
+      }
+    }
+
+    // Grant admin role to market contract in DynamicPricing so it can call pricing functions
+    const PRICING_ADMIN_ROLE = await dynamicPricingInstance.ADMIN_ROLE();
+    const marketHasAdminRole = await dynamicPricingInstance.hasRole(
+      PRICING_ADMIN_ROLE,
+      ecoXChangeMarketInstance.address
+    );
+    console.log("Market has ADMIN_ROLE in DynamicPricing:", marketHasAdminRole);
+
+    if (!marketHasAdminRole) {
+      await dynamicPricingInstance.grantRole(
+        PRICING_ADMIN_ROLE,
+        ecoXChangeMarketInstance.address,
+        { from: owner }
+      );
+      console.log(
+        "Successfully granted ADMIN_ROLE to market contract in DynamicPricing"
+      );
+    }
   });
   console.log("Testing EcoXChangeMarket contract");
 
@@ -56,12 +108,25 @@ contract("EcoXChangeMarket for Completed Projects", function (accounts) {
   });
 
   it("Selling EXC from Completed Project", async () => {
+    // Initialize pricing for the project first (before setting it as completed)
+    await ecoXChangeMarketInstance.initializeProjectPricing(0, 1, 500, {
+      from: owner,
+    });
+
     await companyInstance.setProjectStateComplete(0); // set project to be completed
     await ecoXChangeTokenInstance.getEXC(companyAddress, 3); // give 3 EXC to the company (since its a completed project)
     let initialSellerEXC = await ecoXChangeTokenInstance.checkEXC(
       companyAddress
     );
     assert(initialSellerEXC.toNumber() === 3, "EXC not added to company");
+
+    // Check if company has the required role
+    const COMPANY_ROLE = await companyInstance.COMPANY_ROLE();
+    const hasCompanyRole = await companyInstance.hasRole(
+      COMPANY_ROLE,
+      companyAddress
+    );
+    console.log("Company has COMPANY_ROLE:", hasCompanyRole);
 
     await ecoXChangeMarketInstance.sell(3, 0, {
       from: companyAddress,

@@ -38,10 +38,18 @@ contract("AccessControl Security Tests", (accounts) => {
     ecoXChangeToken = await EcoXChangeToken.new(erc20.address, { from: admin });
     validatorRegistry = await ValidatorRegistry.new({ from: admin });
     company = await Company.new({ from: admin });
+
+    // Deploy DynamicPricing contract
+    const DynamicPricing = artifacts.require("DynamicPricing");
+    const dynamicPricing = await DynamicPricing.new(company.address, {
+      from: admin,
+    });
+
     ecoXChangeMarket = await EcoXChangeMarket.new(
       company.address,
       ecoXChangeToken.address,
       validatorRegistry.address,
+      dynamicPricing.address,
       { from: admin }
     );
   });

@@ -4,6 +4,7 @@ import "./ValidatorRegistry.sol";
 import "./EcoXChangeToken.sol";
 import "./Company.sol";
 import "./AccessControl.sol";
+import "./DynamicPricing.sol";
 
 /**
  * @title EcoXChangeMarket
@@ -11,19 +12,40 @@ import "./AccessControl.sol";
  */
 contract EcoXChangeMarket is AccessControl {
     // Events
-    event BuyCredit(address buyer, uint256 amount);
-    event ReturnCredits(address seller, uint256 amount);
+    event BuyCredit(
+        address buyer,
+        uint256 amount,
+        uint256 price,
+        uint256 totalCost
+    );
+    event ReturnCredits(
+        address seller,
+        uint256 amount,
+        uint256 price,
+        uint256 totalRevenue
+    );
     event ProjectValidated(
         address companyAddress,
         uint256 projectId,
         bool isValid
     );
     event Penalty(address companyAddress, uint256 projectId);
+    event PriceDiscovery(
+        uint256 indexed projectId,
+        uint256 oldPrice,
+        uint256 newPrice
+    );
+    event MarketMaking(
+        uint256 indexed projectId,
+        uint256 bidPrice,
+        uint256 askPrice
+    );
 
     // State variables
     EcoXChangeToken ecoXChangeTokenInstance;
     ValidatorRegistry validatorRegistryInstance;
     Company companyInstance;
+    DynamicPricing dynamicPricingInstance;
     uint256 excBank = 0;
     mapping(address => bool) public isSeller;
     mapping(address => uint256[]) public companyProjects; // Mapping of company address to list of projects
@@ -45,11 +67,13 @@ contract EcoXChangeMarket is AccessControl {
     constructor(
         Company companyAddress,
         EcoXChangeToken ecoXChangeTokenAddress,
-        ValidatorRegistry validatorRegistryAddress
+        ValidatorRegistry validatorRegistryAddress,
+        DynamicPricing dynamicPricingAddress
     ) public {
         ecoXChangeTokenInstance = ecoXChangeTokenAddress;
         validatorRegistryInstance = validatorRegistryAddress;
         companyInstance = companyAddress;
+        dynamicPricingInstance = dynamicPricingAddress;
     }
 
     /**
@@ -111,7 +135,6 @@ contract EcoXChangeMarket is AccessControl {
             amount <= address(this).balance,
             "Insufficient contract balance"
         );
-        amount = amount * 1 ether; //convert to wei before transfer
         companyAddress.transfer(amount);
     }
 
@@ -169,7 +192,9 @@ contract EcoXChangeMarket is AccessControl {
                 // Loop through buyers of the project
                 address buyer = buyers[i];
                 uint256 buyerStake = projectStakes[buyer][projectId]; // Get buyer's stake for the project
-                ecoXChangeTokenInstance.getEXC(buyer, buyerStake); // Mint EXC to buyer
+                if (buyerStake > 0) {
+                    ecoXChangeTokenInstance.getEXC(buyer, buyerStake); // Mint EXC to buyer
+                }
                 projectStakes[buyer][projectId] = 0; // Reset buyer's stake to 0
             }
             // Project's EXCAmount left is returned to project
@@ -293,6 +318,12 @@ contract EcoXChangeMarket is AccessControl {
             "Insufficient EXC to sell"
         ); // Check if seller has enough exc to sell in project, especially after sold excs from this project before
 
+        // Get current dynamic price
+        uint256 currentPrice = dynamicPricingInstance.getCurrentPrice(
+            projectId
+        );
+        uint256 totalRevenue = _excAmount * currentPrice;
+
         if (
             companyInstance.getProjectState(projectId) ==
             Company.ProjectState.completed
@@ -325,7 +356,15 @@ contract EcoXChangeMarket is AccessControl {
             }
             isSeller[msg.sender] = true; // add address of seller to list of sellers
         }
-        emit ReturnCredits(msg.sender, _excAmount);
+
+        // Update pricing after trade
+        dynamicPricingInstance.updatePriceAfterTrade(
+            projectId,
+            _excAmount,
+            false
+        );
+
+        emit ReturnCredits(msg.sender, _excAmount, currentPrice, totalRevenue);
     }
 
     /**
@@ -347,10 +386,16 @@ contract EcoXChangeMarket is AccessControl {
         validTransactionAmount(_excAmount)
         nonReentrant
     {
+        // Get current dynamic price
+        uint256 currentPrice = dynamicPricingInstance.getCurrentPrice(
+            projectId
+        );
+        uint256 totalCost = _excAmount * currentPrice;
+
         // Enhanced validation
         require(
-            msg.value == _excAmount * 1 ether,
-            "EcoXChangeMarket: incorrect ether amount"
+            msg.value >= totalCost,
+            "EcoXChangeMarket: insufficient ether for current price"
         );
         require(
             companyInstance.registeredCompanies(companyAddress),
@@ -367,6 +412,9 @@ contract EcoXChangeMarket is AccessControl {
 
         companyInstance.sellEXC(companyAddress, projectId, _excAmount); // increase excSold in project by _excAmount
 
+        // Calculate refund if overpaid
+        uint256 refund = msg.value - totalCost;
+
         if (
             companyInstance.getProjectState(projectId) ==
             Company.ProjectState.completed
@@ -378,7 +426,7 @@ contract EcoXChangeMarket is AccessControl {
             excBank -= _excAmount; // deduct EXC from bank
             relisted[companyAddress][projectId] -= _excAmount; // deduct EXC from company's relisted EXC
             ecoXChangeTokenInstance.transferEXC(msg.sender, _excAmount); // transfer EXC to buyer from market
-            companyAddress.transfer(msg.value); // transfer ether to company
+            companyAddress.transfer(totalCost); // transfer exact cost to company
         } else {
             projectStakes[msg.sender][projectId] += _excAmount; // add "share" of the project's EXC bought to the buyer
 
@@ -394,12 +442,120 @@ contract EcoXChangeMarket is AccessControl {
                 projectBuyers[projectId].push(msg.sender);
             }
         }
-        emit BuyCredit(msg.sender, _excAmount);
+
+        // Update dynamic pricing after trade
+        dynamicPricingInstance.updatePriceAfterTrade(
+            projectId,
+            _excAmount,
+            true
+        );
+
+        // Refund overpayment
+        if (refund > 0) {
+            msg.sender.transfer(refund);
+        }
+
+        emit BuyCredit(msg.sender, _excAmount, currentPrice, totalCost);
     }
 
     function getProjectBuyers(
         uint256 projectId
     ) public view returns (address[] memory) {
         return projectBuyers[projectId];
+    }
+
+    /**
+     * @dev Get current price for a project
+     */
+    function getCurrentPrice(uint256 projectId) public view returns (uint256) {
+        return dynamicPricingInstance.getCurrentPrice(projectId);
+    }
+
+    /**
+     * @dev Get comprehensive pricing information for a project
+     */
+    function getProjectPricingInfo(
+        uint256 projectId
+    )
+        public
+        view
+        returns (
+            uint256 currentPrice,
+            uint256 basePrice,
+            uint256 minPrice,
+            uint256 maxPrice,
+            DynamicPricing.PricingModel model,
+            uint256 totalVolume,
+            uint256 qualityScore,
+            uint256 demandScore,
+            uint256 supplyScore
+        )
+    {
+        return dynamicPricingInstance.getProjectPricingInfo(projectId);
+    }
+
+    /**
+     * @dev Calculate price impact for a potential trade
+     */
+    function calculatePriceImpact(
+        uint256 projectId,
+        uint256 tradeAmount,
+        bool isBuy
+    ) public view returns (uint256 priceImpact, uint256 newPrice) {
+        return
+            dynamicPricingInstance.calculatePriceImpact(
+                projectId,
+                tradeAmount,
+                isBuy
+            );
+    }
+
+    /**
+     * @dev Get market conditions
+     */
+    function getMarketConditions()
+        public
+        view
+        returns (
+            uint256 demandMultiplier,
+            uint256 supplyMultiplier,
+            uint256 volatilityIndex,
+            uint256 sentiment,
+            uint256 lastUpdate
+        )
+    {
+        return dynamicPricingInstance.getMarketConditions();
+    }
+
+    /**
+     * @dev Initialize pricing for a new project (admin only)
+     */
+    function initializeProjectPricing(
+        uint256 projectId,
+        DynamicPricing.PricingModel model,
+        uint256 qualityScore
+    ) public onlyRole(ADMIN_ROLE) whenNotPaused {
+        dynamicPricingInstance.initializeProjectPricing(
+            projectId,
+            model,
+            qualityScore
+        );
+    }
+
+    /**
+     * @dev Update market conditions (admin only)
+     */
+    function updateMarketConditions(
+        uint256 demandMultiplier,
+        uint256 supplyMultiplier,
+        uint256 volatilityIndex,
+        uint256 sentiment
+    ) public onlyRole(ADMIN_ROLE) whenNotPaused {
+        dynamicPricingInstance.updateMarketConditions(
+            demandMultiplier,
+            supplyMultiplier,
+            volatilityIndex,
+            sentiment
+        );
     }
 }
